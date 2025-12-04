@@ -11,7 +11,7 @@ Perfect for teams practicing trunk-based development or using feature branches w
 
 ## ✨ Features
 
-- 🔍 **Scans all commits** - Extracts ticket references from every commit message in the PR
+- 🔍 **Scans PR title and all commits** - Extracts ticket references from PR title and every commit message
 - 🎯 **Smart deduplication** - Only checks each unique ticket once
 - 🚫 **Configurable blocking** - Define which Jira statuses should block merging
 - 🔓 **Bypass mechanism** - Emergency hotfixes can skip validation with keywords
@@ -19,7 +19,8 @@ Perfect for teams practicing trunk-based development or using feature branches w
 - ⚡ **Fast and reliable** - Uses Jira REST API v3 with efficient queries
 - 🔒 **Secure** - Uses GitHub secrets for credentials
 - 🎨 **Flexible** - Works with any Jira ticket prefix (PROJ, JIRA, DEV, etc.)
-- 🏷️ **Position agnostic** - Finds tickets anywhere in commit messages
+- 🏷️ **Position agnostic** - Finds tickets anywhere in PR title or commit messages
+- 🔤 **Case insensitive** - Matches tickets regardless of case
 
 ---
 
@@ -223,7 +224,7 @@ jobs:
 | Output | Type | Description |
 |--------|------|-------------|
 | `blocked-tickets` | JSON Array | List of tickets with blocking statuses (e.g., `[{"key":"PROJ-123","status":"Blocked"}]`) |
-| `all-tickets` | JSON Array | All unique tickets found in commits |
+| `all-tickets` | JSON Array | All unique tickets found in PR title and commits |
 | `has-blocked` | Boolean | `true` if any ticket has a blocking status, `false` otherwise |
 
 ---
@@ -238,7 +239,15 @@ jobs:
    If found → Skip all checks ✅
    If not found → Continue
 
-2. Extract tickets from commits
+2. Extract tickets from PR title
+   ↓
+   Scan PR title for {PREFIX}-{number}
+   Examples: 
+   - "PROJ-100: Add feature" → Extract "PROJ-100"
+   - "[PROJ-100] Fix bug" → Extract "PROJ-100"
+   - "Fix for proj-100" → Extract "PROJ-100" (case insensitive)
+
+3. Extract tickets from commits
    ↓
    Scan all commit messages for {PREFIX}-{number}
    Examples: 
@@ -247,13 +256,13 @@ jobs:
    - "Fix PROJ-100 and PROJ-101" → Extract both
    Remove duplicates using Set
 
-3. Check Jira status
+4. Check Jira status
    ↓
-   For each unique ticket:
+   For each unique ticket (from PR title + commits):
    - Query Jira API: /rest/api/3/issue/{key}?fields=status
    - Get current workflow status
 
-4. Validate & Block
+5. Validate & Block
    ↓
    If any ticket status is in blocked-statuses list:
    - ❌ Fail the check
@@ -263,6 +272,32 @@ jobs:
    Otherwise:
    - ✅ Pass the check
    - 🎉 Allow merge
+```
+
+---
+
+## 💡 PR Title Formats
+
+The action finds tickets in your PR title (case-insensitive):
+
+### Standard Format
+```
+PROJ-123: Add user authentication
+```
+
+### Brackets
+```
+[PROJ-123] Implement feature
+```
+
+### Lowercase (Still Works)
+```
+proj-123: add feature
+```
+
+### Multiple Tickets
+```
+PROJ-123 and PROJ-456: Fix bugs
 ```
 
 ---
@@ -302,6 +337,7 @@ Add feature for PROJ-123
 ```
 proj-123: lowercase still works
 PROJ-123: UPPERCASE WORKS TOO
+PrOj-123: MiXeD CaSe WoRkS
 ```
 
 ---
@@ -310,26 +346,71 @@ PROJ-123: UPPERCASE WORKS TOO
 
 ### Scenario 1: Single Feature Branch
 
+**PR Title:** `PROJ-200: Implement payment gateway`
+
 **Configuration:**
 ```yaml
-ticket-prefix: 'DEV'
+ticket-prefix: 'PROJ'
 ```
 
 **Commits:**
 ```
-abc1234 DEV-100: Implement user authentication
-def5678 chore(DEV-100): Add tests for auth
-ghi9012 Fix linting issues in DEV-100
+abc1234 PROJ-200: Add Stripe integration
+def5678 chore(PROJ-200): Add tests
+ghi9012 Fix linting issues
 ```
 
 **Result:**
-- Finds 1 unique ticket: `DEV-100`
+- Finds 1 unique ticket: `PROJ-200` (from PR title + commits)
 - Checks status: `In Progress` ✅
 - **Decision: PASS** - PR can be merged
 
 ---
 
-### Scenario 2: Merge from develop to staging
+### Scenario 2: PR Title with Blocked Ticket
+
+**PR Title:** `PROJ-2400: Test jira-blocked tickets don't get merged`
+
+**Configuration:**
+```yaml
+ticket-prefix: 'PROJ'
+blocked-statuses: 'Blocked, Paused'
+```
+
+**Commits:**
+```
+123abcd PROJ-2056: Feature A (status: Done)
+456efgh PROJ-2112: Feature B (status: Done)
+```
+
+**Result:**
+- Finds 3 unique tickets: `PROJ-2400` (from title), `PROJ-2056`, `PROJ-2112` (from commits)
+- Checks statuses:
+  - `PROJ-2400`: `Blocked` ❌
+  - `PROJ-2056`: `Done` ✅
+  - `PROJ-2112`: `Done` ✅
+- **Decision: FAIL** - Cannot merge due to PROJ-2400
+
+**Action Summary:**
+```
+Jira Ticket Status Check
+┌───────────┬────────────┬──────────────┐
+│ Ticket    │ Status     │ Result       │
+├───────────┼────────────┼──────────── ─┤
+│ PROJ-2400 │ Blocked    │ ❌ BLOCKED   │
+│ PROJ-2056 │ Done       │ ✅ OK        │
+│ PROJ-2112 │ Done       │ ✅ OK        │
+└───────────┴────────────┴──────────────┘
+
+❌ The following tickets have blocking statuses:
+  - PROJ-2400: Blocked
+```
+
+---
+
+### Scenario 3: Merge from develop to staging
+
+**PR Title:** `Merge develop to staging`
 
 **Configuration:**
 ```yaml
@@ -345,31 +426,17 @@ ticket-prefix: 'PROJ'
 ```
 
 **Result:**
-- Finds 3 unique tickets: `PROJ-100`, `PROJ-101`, `PROJ-102`
+- No tickets in PR title
+- Finds 3 unique tickets from commits: `PROJ-100`, `PROJ-101`, `PROJ-102`
 - Checks statuses:
   - `PROJ-100`: `Done` ✅
   - `PROJ-101`: `Blocked` ❌
   - `PROJ-102`: `In Review` ✅
 - **Decision: FAIL** - Cannot merge due to PROJ-101
 
-**Action Summary:**
-```
-Jira Ticket Status Check
-┌──────────┬────────────┬──────────────┐
-│ Ticket   │ Status     │ Result       │
-├──────────┼────────────┼──────────────┤
-│ PROJ-100 │ Done       │ ✅ OK        │
-│ PROJ-101 │ Blocked    │ ❌ BLOCKED   │
-│ PROJ-102 │ In Review  │ ✅ OK        │
-└──────────┴────────────┴──────────────┘
-
-❌ The following tickets have blocking statuses:
-  - PROJ-101: Blocked
-```
-
 ---
 
-### Scenario 3: Emergency Hotfix
+### Scenario 4: Emergency Hotfix
 
 **PR Title:** `[noticket] Emergency production fix for memory leak`
 
@@ -380,7 +447,7 @@ Jira Ticket Status Check
 
 ---
 
-### Scenario 4: Multiple Bypass Keywords
+### Scenario 5: Multiple Bypass Keywords
 
 **Configuration:**
 ```yaml
@@ -486,12 +553,12 @@ https://company.atlassian.net/browse/PROJ-123
 
 ### Step 5: Test It
 
-1. Create a test PR with a Jira ticket in commit message:
+1. Create a test PR with a Jira ticket in the title or commit message:
    ```bash
    git commit -m "PROJ-123: Test PR for Jira integration"
    git push origin my-feature-branch
    ```
-2. Open a PR on GitHub
+2. Open a PR on GitHub with title: `PROJ-123: Test integration`
 3. Check the **Actions** tab for workflow run
 4. Verify the ticket status is checked
 
@@ -511,21 +578,39 @@ https://company.atlassian.net/browse/PROJ-123
 
 ---
 
-### Error: "No PROJ-{number} found in commits"
+### Error: "No PROJ-{number} found in PR title or commits"
 
-**Cause:** Commits don't contain ticket references with your specified prefix
+**Cause:** Neither the PR title nor commits contain ticket references with your specified prefix
 
 **Solution:**
-1. Verify commit messages include `{PREFIX}-{number}` (e.g., `PROJ-123`)
-2. Check that `ticket-prefix` matches your Jira project (case-sensitive)
-3. Or add bypass keyword to PR title (e.g., `[noticket]`)
+1. Add ticket to PR title: `PROJ-123: Your feature`
+2. Or add ticket to a commit message: `PROJ-123: Implement feature`
+3. Check that `ticket-prefix` matches your Jira project (case-insensitive)
+4. Or add bypass keyword to PR title (e.g., `[noticket]`)
 
 **Valid formats:**
-- ✅ `PROJ-123: Add feature`
-- ✅ `chore(PROJ-123): test`
-- ✅ `Fix PROJ-123`
+- ✅ PR Title: `PROJ-123: Add feature`
+- ✅ PR Title: `[PROJ-123] Add feature`
+- ✅ Commit: `PROJ-123: Add feature`
+- ✅ Commit: `chore(PROJ-123): test`
+- ✅ Commit: `Fix PROJ-123`
 - ❌ `PROJ 123` (no dash)
-- ❌ `proj-123` (wrong case for prefix)
+
+---
+
+### Ticket in PR title not being detected
+
+**Cause:** Ticket might be in an unexpected format
+
+**Solution:**
+The action searches for the pattern `{PREFIX}-{number}` anywhere in the PR title:
+- ✅ `PROJ-123: Title` works
+- ✅ `[PROJ-123] Title` works
+- ✅ `Title PROJ-123` works
+- ✅ `proj-123: Title` works (case-insensitive)
+- ❌ `PROJ 123` doesn't work (must have dash)
+
+Check your PR title format and ensure it includes `{PREFIX}-{number}`.
 
 ---
 
@@ -568,13 +653,28 @@ Ensure the REST API v3 is enabled.
 
 ---
 
-### Q: Does the ticket need to be at the start of the commit message?
+### Q: Does the ticket need to be at the start of the PR title or commit message?
 
-**A:** No! The action finds tickets **anywhere** in the commit message:
+**A:** No! The action finds tickets **anywhere** in the PR title and commit messages:
 - ✅ `PROJ-123: Add feature`
+- ✅ `[PROJ-123] Add feature`
 - ✅ `chore(PROJ-123): test`
 - ✅ `Add feature for PROJ-123`
 - ✅ `Fix PROJ-100 and PROJ-101`
+
+---
+
+### Q: Are ticket references case-sensitive?
+
+**A:** No! Ticket matching is case-insensitive:
+- `PROJ-123`, `proj-123`, `Proj-123` all match the same ticket
+- The action normalizes all tickets to uppercase (e.g., `PROJ-123`)
+
+---
+
+### Q: What if I reference a ticket in the PR title AND in commits?
+
+**A:** The action deduplicates automatically! It will only check each unique ticket once, even if it appears in both the PR title and multiple commits.
 
 ---
 
@@ -649,11 +749,11 @@ blocked-statuses: 'New, Backlog, Blocked, On Hold, Paused, Rejected'
 
 ---
 
-## 🔄 Migration from v1.x to v2.0
+## 🔄 Migration Guides
+
+### From v1.x to v2.0
 
 Version 2.0 introduces a simpler, more intuitive format for configuring blocked statuses and bypass keywords.
-
-### Changes
 
 **Input format changed from JSON arrays to comma-separated strings:**
 
@@ -662,37 +762,44 @@ Version 2.0 introduces a simpler, more intuitive format for configuring blocked 
 blocked-statuses: '["Requires fixing", "Paused"]'
 bypass-keywords: '["noticket", "hotfix"]'
 
-# v2.0 (New - Comma-separated strings)
+# v2.0+ (New - Comma-separated strings)
 blocked-statuses: 'Requires fixing, Paused'
 bypass-keywords: 'noticket, hotfix'
 ```
 
-### Migration Steps
+**Migration Steps:**
 
-1. **Update your workflow file** to use `@v2` instead of `@v1`:
+1. Update your workflow file to use `@v2`:
    ```yaml
    - uses: designcise/jira-ticket-status-action@v2
    ```
 
-2. **Convert JSON arrays to comma-separated strings:**
+2. Convert JSON arrays to comma-separated strings:
    ```yaml
-   # Before (v1.x)
-   blocked-statuses: '["Blocked", "On Hold", "Paused"]'
-   bypass-keywords: '["noticket", "hotfix", "emergency"]'
-   
-   # After (v2.0)
    blocked-statuses: 'Blocked, On Hold, Paused'
    bypass-keywords: 'noticket, hotfix, emergency'
    ```
 
-3. **Test your workflow** to ensure it works as expected
+3. Test your workflow
 
-### Why This Change?
+---
 
-- ✅ **Simpler syntax** - No need to escape quotes or worry about JSON formatting
-- ✅ **More intuitive** - Matches standard GitHub Actions conventions
-- ✅ **Less error-prone** - Easier to read and write, fewer syntax errors
-- ✅ **Better UX** - Consistent with how most GitHub Actions handle lists
+### From v2.0 to v2.1
+
+Version 2.1 adds PR title scanning - **no breaking changes!**
+
+**What's new:**
+- ✅ Tickets in PR title are now detected automatically
+- ✅ Case-insensitive ticket matching
+- ✅ All tickets normalized to uppercase
+
+**Migration:**
+Simply update to `@v2` (or `@v2.1`) - no configuration changes needed:
+```yaml
+- uses: designcise/jira-ticket-status-action@v2
+```
+
+Your existing workflows will continue to work, with the added benefit of PR title scanning!
 
 ---
 
@@ -728,7 +835,7 @@ Found a bug? [Open an issue](https://github.com/designcise/jira-ticket-status-ac
 - Error message
 - Jira version (Cloud/Server/Data Center)
 - Ticket prefix being used
-- Example commit messages
+- PR title and example commit messages
 
 ---
 

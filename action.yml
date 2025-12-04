@@ -84,15 +84,30 @@ runs:
             core.notice(`Bypassing Jira check due to keyword: "${matchedKeyword}"`);
           }
 
-    - name: Extract tickets from commits
+    - name: Extract tickets from PR title and commits
       id: extract
       if: steps.bypass.outputs.bypass != 'true'
       uses: actions/github-script@v7
       with:
         script: |
           const prefix = '${{ inputs.ticket-prefix }}';
-          const regex = new RegExp(`${prefix}-\\d+`, 'g');
+          const regex = new RegExp(`${prefix}-\\d+`, 'gi');
           
+          const ticketSet = new Set();
+          
+          // Extract from PR title
+          const prTitle = context.payload.pull_request.title || '';
+          core.info(`PR title: "${prTitle}"`);
+          const titleMatches = prTitle.match(regex);
+          if (titleMatches) {
+            titleMatches.forEach(ticket => {
+              const normalizedTicket = ticket.toUpperCase();
+              ticketSet.add(normalizedTicket);
+              core.info(`Found ticket: ${normalizedTicket} in PR title`);
+            });
+          }
+          
+          // Extract from commits
           const commits = await github.rest.pulls.listCommits({
             owner: context.repo.owner,
             repo: context.repo.repo,
@@ -101,21 +116,21 @@ runs:
           
           core.info(`Found ${commits.data.length} commits in PR`);
           
-          const ticketSet = new Set();
           for (const commit of commits.data) {
             const message = commit.commit.message || '';
             const matches = message.match(regex);
             if (matches) {
               matches.forEach(ticket => {
-                ticketSet.add(ticket);
-                core.info(`Found ticket: ${ticket} in commit ${commit.sha.substring(0, 7)}`);
+                const normalizedTicket = ticket.toUpperCase();
+                ticketSet.add(normalizedTicket);
+                core.info(`Found ticket: ${normalizedTicket} in commit ${commit.sha.substring(0, 7)}`);
               });
             }
           }
           
           const tickets = Array.from(ticketSet);
           if (tickets.length === 0) {
-            core.setFailed(`No ${prefix}-{number} found in commits and PR not marked with bypass keyword`);
+            core.setFailed(`No ${prefix}-{number} found in PR title or commits and PR not marked with bypass keyword`);
             return;
           }
           
