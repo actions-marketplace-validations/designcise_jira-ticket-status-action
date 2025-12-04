@@ -39,7 +39,7 @@ jobs:
   check-jira:
     runs-on: ubuntu-latest
     steps:
-      - uses: designcise/jira-ticket-status-action@v1
+      - uses: designcise/jira-ticket-status-action@v2
         with:
           jira-base-url: ${{ secrets.JIRA_BASE_URL }}
           jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -72,7 +72,7 @@ Done! 🎉
 ### Basic Usage
 
 ```yaml
-- uses: designcise/jira-ticket-status-action@v1
+- uses: designcise/jira-ticket-status-action@v2
   with:
     jira-base-url: ${{ secrets.JIRA_BASE_URL }}
     jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -91,13 +91,13 @@ Done! 🎉
 Define exactly which statuses should block PRs:
 
 ```yaml
-- uses: designcise/jira-ticket-status-action@v1
+- uses: designcise/jira-ticket-status-action@v2
   with:
     jira-base-url: ${{ secrets.JIRA_BASE_URL }}
     jira-email: ${{ secrets.JIRA_EMAIL }}
     jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
     ticket-prefix: 'PROJ'
-    blocked-statuses: '["Blocked", "Paused", "Rejected", "Needs Clarification"]'
+    blocked-statuses: 'Blocked, Paused, Rejected, Needs Clarification'
 ```
 
 ---
@@ -107,13 +107,13 @@ Define exactly which statuses should block PRs:
 Allow different keywords for bypassing the check:
 
 ```yaml
-- uses: designcise/jira-ticket-status-action@v1
+- uses: designcise/jira-ticket-status-action@v2
   with:
     jira-base-url: ${{ secrets.JIRA_BASE_URL }}
     jira-email: ${{ secrets.JIRA_EMAIL }}
     jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
     ticket-prefix: 'DEV'
-    bypass-keywords: '["noticket", "hotfix", "emergency", "skip-jira"]'
+    bypass-keywords: 'noticket, hotfix, emergency, skip-jira'
 ```
 
 **PR titles that bypass:**
@@ -134,7 +134,7 @@ jobs:
   check-project-a:
     runs-on: ubuntu-latest
     steps:
-      - uses: designcise/jira-ticket-status-action@v1
+      - uses: designcise/jira-ticket-status-action@v2
         with:
           jira-base-url: ${{ secrets.JIRA_BASE_URL }}
           jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -144,7 +144,7 @@ jobs:
   check-project-b:
     runs-on: ubuntu-latest
     steps:
-      - uses: designcise/jira-ticket-status-action@v1
+      - uses: designcise/jira-ticket-status-action@v2
         with:
           jira-base-url: ${{ secrets.JIRA_BASE_URL }}
           jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -161,7 +161,7 @@ Make decisions based on check results:
 ```yaml
 - name: Check Jira tickets
   id: jira
-  uses: designcise/jira-ticket-status-action@v1
+  uses: designcise/jira-ticket-status-action@v2
   with:
     jira-base-url: ${{ secrets.JIRA_BASE_URL }}
     jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -195,7 +195,7 @@ jobs:
   check-jira:
     runs-on: ubuntu-latest
     steps:
-      - uses: designcise/jira-ticket-status-action@v1
+      - uses: designcise/jira-ticket-status-action@v2
         with:
           jira-base-url: ${{ secrets.JIRA_BASE_URL }}
           jira-email: ${{ secrets.JIRA_EMAIL }}
@@ -213,8 +213,8 @@ jobs:
 | `jira-email` | Email address for Jira API authentication | **Yes** | - |
 | `jira-api-token` | API token for authentication ([How to create](https://id.atlassian.com/manage-profile/security/api-tokens)) | **Yes** | - |
 | `ticket-prefix` | Jira ticket prefix (e.g., `PROJ`, `JIRA`, `DEV`) | **Yes** | - |
-| `blocked-statuses` | JSON array of Jira statuses that should block PRs | No | `["Requires fixing", "Blocked", "On Hold", "Waiting for Dependency"]` |
-| `bypass-keywords` | JSON array of keywords in PR title to bypass check | No | `["noticket"]` |
+| `blocked-statuses` | Comma-separated list of Jira statuses that should block PRs | No | `Requires fixing, Blocked, On Hold, Waiting for Dependency` |
+| `bypass-keywords` | Comma-separated list of keywords in PR title to bypass check | No | `noticket` |
 
 ---
 
@@ -384,7 +384,7 @@ Jira Ticket Status Check
 
 **Configuration:**
 ```yaml
-bypass-keywords: '["noticket", "hotfix", "emergency"]'
+bypass-keywords: 'noticket, hotfix, emergency'
 ```
 
 **PR Titles that bypass:**
@@ -529,21 +529,6 @@ https://company.atlassian.net/browse/PROJ-123
 
 ---
 
-### Error: "bypass-keywords is not valid JSON array"
-
-**Cause:** Invalid JSON format in `bypass-keywords` input
-
-**Solution:**
-```yaml
-# ❌ Wrong
-bypass-keywords: noticket, hotfix
-
-# ✅ Correct
-bypass-keywords: '["noticket", "hotfix"]'
-```
-
----
-
 ### Warning: "Never Accessed" in Atlassian
 
 **Cause:** API token hasn't been used successfully
@@ -599,12 +584,12 @@ Ensure the REST API v3 is enabled.
 
 ```yaml
 steps:
-  - uses: designcise/jira-ticket-status-action@v1
+  - uses: designcise/jira-ticket-status-action@v2
     with:
       ticket-prefix: 'PROJ'
       # ... other inputs
 
-  - uses: designcise/jira-ticket-status-action@v1
+  - uses: designcise/jira-ticket-status-action@v2
     with:
       ticket-prefix: 'DEV'
       # ... other inputs
@@ -620,9 +605,9 @@ steps:
 
 ### Q: How do I allow multiple bypass keywords?
 
-**A:** Use a JSON array:
+**A:** Use a comma-separated list:
 ```yaml
-bypass-keywords: '["noticket", "hotfix", "emergency", "skip-jira"]'
+bypass-keywords: 'noticket, hotfix, emergency, skip-jira'
 ```
 
 All keywords are case-insensitive and handle variations like `no-ticket`, `noticket`, `no ticket`.
@@ -642,7 +627,7 @@ All keywords are case-insensitive and handle variations like `no-ticket`, `notic
 ```yaml
 # Allow only: "In Progress", "In Review", "Done"
 # Block everything else:
-blocked-statuses: '["New", "Backlog", "Blocked", "On Hold", "Paused", "Rejected"]'
+blocked-statuses: 'New, Backlog, Blocked, On Hold, Paused, Rejected'
 ```
 
 ---
@@ -661,6 +646,53 @@ blocked-statuses: '["New", "Backlog", "Blocked", "On Hold", "Paused", "Rejected"
 **A:** No! All keywords are matched case-insensitively:
 - `noticket` matches `NOTICKET`, `NoTicket`, `[NOTICKET]`, etc.
 - `hotfix` matches `HOTFIX`, `HotFix`, `[hotfix]`, etc.
+
+---
+
+## 🔄 Migration from v1.x to v2.0
+
+Version 2.0 introduces a simpler, more intuitive format for configuring blocked statuses and bypass keywords.
+
+### Changes
+
+**Input format changed from JSON arrays to comma-separated strings:**
+
+```yaml
+# v1.x (Old - JSON arrays)
+blocked-statuses: '["Requires fixing", "Paused"]'
+bypass-keywords: '["noticket", "hotfix"]'
+
+# v2.0 (New - Comma-separated strings)
+blocked-statuses: 'Requires fixing, Paused'
+bypass-keywords: 'noticket, hotfix'
+```
+
+### Migration Steps
+
+1. **Update your workflow file** to use `@v2` instead of `@v1`:
+   ```yaml
+   - uses: designcise/jira-ticket-status-action@v2
+   ```
+
+2. **Convert JSON arrays to comma-separated strings:**
+   ```yaml
+   # Before (v1.x)
+   blocked-statuses: '["Blocked", "On Hold", "Paused"]'
+   bypass-keywords: '["noticket", "hotfix", "emergency"]'
+   
+   # After (v2.0)
+   blocked-statuses: 'Blocked, On Hold, Paused'
+   bypass-keywords: 'noticket, hotfix, emergency'
+   ```
+
+3. **Test your workflow** to ensure it works as expected
+
+### Why This Change?
+
+- ✅ **Simpler syntax** - No need to escape quotes or worry about JSON formatting
+- ✅ **More intuitive** - Matches standard GitHub Actions conventions
+- ✅ **Less error-prone** - Easier to read and write, fewer syntax errors
+- ✅ **Better UX** - Consistent with how most GitHub Actions handle lists
 
 ---
 

@@ -20,13 +20,13 @@ inputs:
     description: 'Jira ticket prefix to search for (e.g., PROJ, JIRA)'
     required: true
   blocked-statuses:
-    description: 'JSON array of blocking statuses (e.g., ["Blocked", "On Hold"])'
+    description: 'Comma-separated list of blocking statuses (e.g., "Blocked, On Hold, Requires fixing")'
     required: false
-    default: '["Requires fixing", "Blocked", "On Hold", "Waiting for Dependency"]'
+    default: 'Requires fixing, Blocked, On Hold, Waiting for Dependency'
   bypass-keywords:
-    description: 'JSON array of keywords in PR title to bypass check (e.g., ["noticket", "hotfix", "emergency"])'
+    description: 'Comma-separated list of keywords in PR title to bypass check (e.g., "noticket, hotfix, emergency")'
     required: false
-    default: '["noticket"]'
+    default: 'noticket'
 
 outputs:
   blocked-tickets:
@@ -51,13 +51,12 @@ runs:
         script: |
           const title = (context.payload.pull_request.title || '').toLowerCase();
           
-          let keywords = [];
-          try {
-            keywords = JSON.parse(process.env.BYPASS_KEYWORDS || '[]');
-          } catch (e) {
-            core.setFailed(`bypass-keywords is not valid JSON array: ${e.message}`);
-            return;
-          }
+          // Parse comma-separated keywords
+          const keywordsStr = process.env.BYPASS_KEYWORDS || '';
+          const keywords = keywordsStr
+            .split(',')
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
           
           core.info(`PR title: "${context.payload.pull_request.title}"`);
           core.info(`Bypass keywords: ${JSON.stringify(keywords)}`);
@@ -138,7 +137,14 @@ runs:
           if (tickets.length === 0) return;
 
           const base = process.env.JIRA_BASE_URL.replace(/\/$/, '');
-          const blockedList = JSON.parse(process.env.BLOCKED_STATUSES);
+          
+          // Parse comma-separated blocked statuses
+          const blockedStatusesStr = process.env.BLOCKED_STATUSES || '';
+          const blockedList = blockedStatusesStr
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+          
           const blockedLC = blockedList.map(s => String(s).trim().toLowerCase());
           const auth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
 
