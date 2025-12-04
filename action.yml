@@ -1,0 +1,213 @@
+name: 'Jira Ticket Status Check'
+description: 'Block pull requests if associated Jira tickets have blocking workflow statuses'
+author: 'designcise'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  jira-base-url:
+    description: 'Jira instance base URL (e.g., https://your-company.atlassian.net)'
+    required: true
+  jira-email:
+    description: 'Email for Jira API authentication'
+    required: true
+  jira-api-token:
+    description: 'API token for Jira authentication'
+    required: true
+  ticket-prefix:
+    description: 'Jira ticket prefix to search for (e.g., PROJ, JIRA)'
+    required: true
+  blocked-statuses:
+    description: 'JSON array of blocking statuses (e.g., ["Blocked", "On Hold"])'
+    required: false
+    default: '["Requires fixing", "Blocked", "On Hold", "Waiting for Dependency"]'
+  bypass-keywords:
+    description: 'JSON array of keywords in PR title to bypass check (e.g., ["noticket", "hotfix", "emergency"])'
+    required: false
+    default: '["noticket"]'
+
+outputs:
+  blocked-tickets:
+    description: 'JSON array of tickets with blocking statuses'
+    value: ${{ steps.jira.outputs.blocked-tickets }}
+  all-tickets:
+    description: 'JSON array of all tickets found'
+    value: ${{ steps.extract.outputs.tickets }}
+  has-blocked:
+    description: 'Boolean indicating if any tickets are blocked'
+    value: ${{ steps.jira.outputs.has-blocked }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for bypass keywords
+      id: bypass
+      uses: actions/github-script@v7
+      env:
+        BYPASS_KEYWORDS: ${{ inputs.bypass-keywords }}
+      with:
+        script: |
+          const title = (context.payload.pull_request.title || '').toLowerCase();
+          
+          let keywords = [];
+          try {
+            keywords = JSON.parse(process.env.BYPASS_KEYWORDS || '[]');
+          } catch (e) {
+            core.setFailed(`bypass-keywords is not valid JSON array: ${e.message}`);
+            return;
+          }
+          
+          core.info(`PR title: "${context.payload.pull_request.title}"`);
+          core.info(`Bypass keywords: ${JSON.stringify(keywords)}`);
+          
+          let bypass = false;
+          let matchedKeyword = null;
+          
+          for (const keyword of keywords) {
+            const keywordLower = String(keyword).trim().toLowerCase();
+            // Check if keyword exists in title (handles variations like "no-ticket", "noticket", "no ticket")
+            const keywordPattern = keywordLower.replace(/[-\s]/g, '[-\\s]*');
+            const regex = new RegExp(keywordPattern, 'i');
+            
+            if (regex.test(title)) {
+              bypass = true;
+              matchedKeyword = keyword;
+              core.info(`✓ Bypass keyword detected: "${keyword}"`);
+              break;
+            }
+          }
+          
+          core.setOutput('bypass', bypass ? 'true' : 'false');
+          
+          if (bypass) {
+            core.notice(`Bypassing Jira check due to keyword: "${matchedKeyword}"`);
+          }
+
+    - name: Extract tickets from commits
+      id: extract
+      if: steps.bypass.outputs.bypass != 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const prefix = '${{ inputs.ticket-prefix }}';
+          const regex = new RegExp(`${prefix}-\\d+`, 'g');
+          
+          const commits = await github.rest.pulls.listCommits({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.payload.pull_request.number
+          });
+          
+          core.info(`Found ${commits.data.length} commits in PR`);
+          
+          const ticketSet = new Set();
+          for (const commit of commits.data) {
+            const message = commit.commit.message || '';
+            const matches = message.match(regex);
+            if (matches) {
+              matches.forEach(ticket => {
+                ticketSet.add(ticket);
+                core.info(`Found ticket: ${ticket} in commit ${commit.sha.substring(0, 7)}`);
+              });
+            }
+          }
+          
+          const tickets = Array.from(ticketSet);
+          if (tickets.length === 0) {
+            core.setFailed(`No ${prefix}-{number} found in commits and PR not marked with bypass keyword`);
+            return;
+          }
+          
+          core.info(`Unique tickets found: ${tickets.join(', ')}`);
+          core.setOutput('tickets', JSON.stringify(tickets));
+
+    - name: Check Jira status
+      id: jira
+      if: steps.bypass.outputs.bypass != 'true' && steps.extract.outputs.tickets
+      uses: actions/github-script@v7
+      env:
+        JIRA_BASE_URL: ${{ inputs.jira-base-url }}
+        JIRA_EMAIL: ${{ inputs.jira-email }}
+        JIRA_API_TOKEN: ${{ inputs.jira-api-token }}
+        BLOCKED_STATUSES: ${{ inputs.blocked-statuses }}
+      with:
+        script: |
+          const tickets = JSON.parse('${{ steps.extract.outputs.tickets || '[]' }}');
+          if (tickets.length === 0) return;
+
+          const base = process.env.JIRA_BASE_URL.replace(/\/$/, '');
+          const blockedList = JSON.parse(process.env.BLOCKED_STATUSES);
+          const blockedLC = blockedList.map(s => String(s).trim().toLowerCase());
+          const auth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+
+          core.info(`Blocked statuses: ${JSON.stringify(blockedList)}`);
+
+          const results = [];
+          const blockedTickets = [];
+
+          for (const key of tickets) {
+            core.info(`\nChecking ${key}...`);
+            const url = `${base}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`;
+            
+            let res;
+            try {
+              res = await fetch(url, {
+                headers: {
+                  'Authorization': `Basic ${auth}`,
+                  'Accept': 'application/json'
+                }
+              });
+            } catch (e) {
+              core.warning(`Network error fetching ${key}: ${e.message}`);
+              continue;
+            }
+
+            if (!res.ok) {
+              core.warning(`Failed to fetch ${key}: HTTP ${res.status}`);
+              continue;
+            }
+
+            let data;
+            try {
+              data = await res.json();
+            } catch (e) {
+              core.warning(`Invalid JSON for ${key}: ${e.message}`);
+              continue;
+            }
+
+            const statusName = (data.fields?.status?.name || '').trim();
+            if (!statusName) {
+              core.warning(`Could not read status for ${key}`);
+              continue;
+            }
+
+            const isBlocked = blockedLC.includes(statusName.toLowerCase());
+            core.info(`Status: "${statusName}" (blocked=${isBlocked})`);
+
+            results.push({ key, status: statusName, isBlocked });
+            if (isBlocked) {
+              blockedTickets.push({ key, status: statusName });
+            }
+          }
+
+          core.setOutput('results', JSON.stringify(results));
+          core.setOutput('blocked-tickets', JSON.stringify(blockedTickets));
+          core.setOutput('has-blocked', blockedTickets.length > 0 ? 'true' : 'false');
+
+          // Output to step summary
+          await core.summary
+            .addHeading('Jira Ticket Status Check')
+            .addTable([
+              [{data: 'Ticket', header: true}, {data: 'Status', header: true}, {data: 'Result', header: true}],
+              ...results.map(r => [r.key, r.status, r.isBlocked ? '❌ BLOCKED' : '✅ OK'])
+            ])
+            .write();
+
+          if (blockedTickets.length > 0) {
+            const msg = `The following tickets have blocking statuses:\n${blockedTickets.map(t => `- ${t.key}: ${t.status}`).join('\n')}`;
+            core.setFailed(msg);
+          } else {
+            core.info(`✅ All ${results.length} ticket(s) have valid statuses`);
+          }
